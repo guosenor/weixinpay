@@ -1,0 +1,282 @@
+const util = require('./util');
+const axios = require('axios').create();
+var md5 = require('MD5');
+var crypto = require('crypto');
+
+class WeixinPay {
+    constructor(config, sandbox) {
+        this.options = config;
+        this.wxpayID = { appid: this.options.appid, mch_id: this.options.mch_id };
+        if (sandbox) {
+            console.log('weixin pay is sandbox');
+            this.options.sandbox = sandbox;
+            this.getSandboxKey();
+        } else {
+            console.log('weixin pay is production');
+        }
+    }
+
+    /**
+     *  统一下单
+     * 
+     * @param {*} opts
+     *      应用ID	   appid  	是	String(32)	wxd678efh567hg6787	微信开放平台审核通过的应用APPID（请登录open.weixin.qq.com查看，注意与公众号的APPID不同）
+     *      商户号	    mch_id	是	String(32)	1230000109	微信支付分配的商户号
+     *      设备号   	device_info	否	String(32)	013467007045764	终端设备号(门店号或收银设备ID)，默认请传"WEB"
+     *      随机字符串   nonce_str	是	String(32)	5K8264ILTKCH16CQ2502SI8ZNMTM67VS	随机字符串，不长于32位。推荐随机数生成算法
+     *      签名	   sign	    是	String(32)	C380BEC2BFD727A4B6845133519F3AD6	签名，详见签名生成算法
+     *      签名类型	sign_type	否	String(32)	HMAC-SHA256	签名类型，目前支持HMAC-SHA256和MD5，默认为MD5
+     *      商品描述	body	是	String(128)	腾讯充值中心-QQ会员充值	
+     *      商品描述交易字段格式根据不同的应用场景按照以下格式：
+     *      
+     *      APP——需传入应用市场上的APP名字-实际商品名称，天天爱消除-游戏充值。
+     *      
+     *      商品详情	 detail	否	String(8192)	 	商品详细描述，对于使用单品优惠的商户，该字段必须按照规范上传，详见“单品优惠参数说明”
+     *      附加数据	 attach	否	String(127)	深圳分店	附加数据，在查询API和支付通知中原样返回，该字段主要用于商户携带订单的自定义数据
+     *      商户订单号	 out_trade_no	是	String(32)	20150806125346	商户系统内部订单号，要求32个字符内，只能是数字、大小写字母_-|*且在同一个商户号下唯一。详见商户订单号
+     *      货币类型	fee_type	否	String(16)	CNY	符合ISO 4217标准的三位字母代码，默认人民币：CNY，其他值列表详见货币类型
+     *      总金额	    total_fee	是	Int	888	订单总金额，单位为分，详见支付金额
+     *      终端IP	    spbill_create_ip	是	String(64)	123.12.12.123	支持IPV4和IPV6两种格式的IP地址。调用微信支付API的机器IP
+     *      交易起始时间	time_start	否	String(14)	20091225091010	订单生成时间，格式为yyyyMMddHHmmss，如2009年12月25日9点10分10秒表示为20091225091010。其他详见时间规则
+     *      交易结束时间	time_expire	否	String(14)	20091227091010	
+     *      订单失效时间，格式为yyyyMMddHHmmss，如2009年12月27日9点10分10秒表示为20091227091010。订单失效时间是针对订单号而言的，由于在请求支付的时候有一个必传参数prepay_id只有两小时的有效期，所以在重入时间超过2小时的时候需要重新请求下单接口获取新的prepay_id。其他详见时间规则
+     *      
+     *        建议：最短失效时间间隔大于1分钟
+     *      
+     *      订单优惠标记	 goods_tag	否	String(32)	WXG	订单优惠标记，代金券或立减优惠功能的参数，说明详见代金券或立减优惠
+     *      通知地址	    notify_url	是	String(256)	http://www.weixin.qq.com/wxpay/pay.php	接收微信支付异步通知回调地址，通知url必须为直接可访问的url，不能携带参数。
+     *      交易类型	    trade_type	是	String(16)	APP	支付类型
+     *      指定支付方式	 limit_pay	否	String(32)	no_credit	no_credit--指定不能使用信用卡支付
+     *      开发票入口开放标识 	receipt	否	String(8)	Y	Y，传入Y时，支付成功消息和支付详情页将出现开票入口。需要在微信支付商户平台或微信公众平台开通电子发票功能，传此字段才可生效
+     *   
+     */
+
+    createUnifiedOrder(opts) {
+        opts.nonce_str = opts.nonce_str || util.generateNonceString();
+        util.mix(opts, this.wxpayID);
+        opts.sign = this.sign(opts);
+        return this.request(
+            `https://api.mch.weixin.qq.com${this.options.sandbox?'/sandboxnew':''}/pay/unifiedorder`,
+            opts
+        );
+    };
+    //
+
+    /**
+     * 
+     *     @param {*} opts
+     *     商户账号appid	mch_appid	是	wx8888888888888888	String(128)	申请商户号的appid或商户号绑定的appid
+     *     商户号	mchid	是	1900000109	String(32)	微信支付分配的商户号
+     *     设备号	device_info	否	013467007045764	String(32)	微信支付分配的终端设备号
+     *     随机字符串	nonce_str	是	5K8264ILTKCH16CQ2502SI8ZNMTM67VS	String(32)	随机字符串，不长于32位
+     *     签名	sign	是	C380BEC2BFD727A4B6845133519F3AD6	String(32)	签名，详见签名算法
+     *     商户订单号	partner_trade_no	是	10000098201411111234567890	String(32)	商户订单号，需保持唯一性
+     *     (只能是字母或者数字，不能包含有其他字符)
+     *     用户openid	openid	是	oxTWIuGaIt6gTKsQRLau2M0yL16E	String(64)	商户appid下，某用户的openid
+     *     校验用户姓名选项	check_name	是	FORCE_CHECK	String(16)	NO_CHECK：不校验真实姓名 
+     *     FORCE_CHECK：强校验真实姓名
+     *     收款用户姓名	re_user_name	否	王小王	String(64)	收款用户真实姓名。 
+     *     如果check_name设置为FORCE_CHECK，则必填用户真实姓名
+     *     金额	amount	是	10099	int	企业付款金额，单位为分
+     *     企业付款备注	desc	是	理赔	String(100)	企业付款备注，必填。注意：备注中的敏感词会被转成字符*
+     *     Ip地址	spbill_create_ip	是	192.168.0.1	String(32)	该IP同在商户平台设置的IP白名单中的IP没有关联，该IP可传用户端或者服务端的IP。 
+     */
+
+    transfers(opts) {
+        if (!Number.isInteger(opts.amount) || opts.amount < 1) {
+            return Promise.reject('amount error');
+        }
+        if (!openid) {
+            return Promise.reject('openid error');
+        }
+        if (!ip) {
+            return Promise.reject('ip error');
+        }
+        opts.nonce_str = util.generateNonceString();
+        opts.mchid = this.options.mch_id;
+        opts.mch_appid = this.options.appid;
+        opts.sign = this.sign(opts);
+        return this.requestWithPfx(
+            `https://api.mch.weixin.qq.com/${this.options.sandbox?'/sandboxnew':''}/mmpaymkttransfers/promotion/transfers`,
+            opts
+        );
+    };
+
+    /**
+     * 
+     * @param {*} opts
+     *     公众账号ID	appid	是	String(32)	wx8888888888888888	微信分配的公众账号ID（企业号corpid即为此appId）
+     *     商户号	mch_id	是	String(32)	1900000109	微信支付分配的商户号
+     *     随机字符串	nonce_str	是	String(32)	5K8264ILTKCH16CQ2502SI8ZNMTM67VS	随机字符串，不长于32位。推荐随机数生成算法
+     *     签名	sign	是	String(32)	C380BEC2BFD727A4B6845133519F3AD6	签名，详见签名生成算法
+     *     签名类型	sign_type	否	String(32)	HMAC-SHA256	签名类型，目前支持HMAC-SHA256和MD5，默认为MD5
+     *     微信订单号	transaction_id	二选一	String(32)	1217752501201407033233368018	微信生成的订单号，在支付通知中有返回
+     *     商户订单号	out_trade_no	String(32)	1217752501201407033233368018	商户系统内部订单号，要求32个字符内，只能是数字、大小写字母_-|*@ ，且在同一个商户号下唯一。
+     *     商户退款单号	out_refund_no	是	String(64)	1217752501201407033233368018	商户系统内部的退款单号，商户系统内部唯一，只能是数字、大小写字母_-|*@ ，同一退款单号多次请求只退一笔。
+     *     订单金额	total_fee	是	Int	100	订单总金额，单位为分，只能为整数，详见支付金额
+     *     退款金额	refund_fee	是	Int	100	退款总金额，订单总金额，单位为分，只能为整数，详见支付金额
+     *     退款货币种类	refund_fee_type	否	String(8)	CNY	退款货币类型，需与支付一致，或者不填。符合ISO 4217标准的三位字母代码，默认人民币：CNY，其他值列表详见货币类型
+     *     退款原因	refund_desc	否	String(80)	商品已售完	
+     *     若商户传入，会在下发给用户的退款消息中体现退款原因
+     *     
+     *     注意：若订单退款金额≤1元，且属于部分退款，则不会在退款消息中体现退款原因
+     *     
+     *     退款资金来源	refund_account	否	String(30)	REFUND_SOURCE_RECHARGE_FUNDS	
+     *     仅针对老资金流商户使用
+     *     
+     *     REFUND_SOURCE_UNSETTLED_FUNDS---未结算资金退款（默认使用未结算资金退款）
+     *     
+     *     REFUND_SOURCE_RECHARGE_FUNDS---可用余额退款
+     *     
+     *     退款结果通知url	notify_url	否	String(256)	https://weixin.qq.com/notify/	
+     *     异步接收微信支付退款结果通知的回调地址，通知URL必须为外网可访问的url，不允许带参数
+     *     
+     *     如果参数中传了notify_url，则商户平台上配置的回调地址将不会生效。 
+     */
+
+    refund(opts) {
+        if (!opts.out_trade_no && !opts.transaction_id) {
+            return Promise.reject('transaction_id or out_trade_no is required');
+        }
+        opts.nonce_str = opts.nonce_str || util.generateNonceString();
+        util.mix(opts, this.wxpayID);
+        opts.sign = this.sign(opts);
+        return this.requestWithPfx(
+            `https://api.mch.weixin.qq.com${this.options.sandbox?'/sandboxnew':'/secapi'}/pay/refund`,
+            opts
+        );
+    }
+
+    /**
+     * 
+     * @param {*} params 
+     *   mch_id 商户号
+     *   
+     */
+    async getSandboxKey() {
+        const opts = {
+            nonce_str: util.generateNonceString(),
+            mch_id: this.options.mch_id
+        };
+        opts.sign = this.sign(opts);
+        try {
+            const data = await this.request('https://api.mch.weixin.qq.com/sandboxnew/pay/getsignkey', opts);
+            if (data && data.return_code == 'SUCCESS') {
+
+                this.options.partner_key = data.sandbox_signkey;
+                console.log('weixin pay sandbox_signkey:', this.options.partner_key);
+            } else {
+                this.options.partner_key = 'xxxxxxxxxxx';
+                console.log('weixin sandbox error1 : ', data);
+            }
+        } catch (error) {
+            this.options.partner_key = 'xxxxxxxxxxx';
+            console.log('weixin sandbox error2 :', error);
+        }
+    };
+
+    /**
+     * 
+     *   @param {*} params
+     *   应用ID	appid	String(32)	是	wx8888888888888888	微信开放平台审核通过的应用APPID
+     *   商户号	partnerid	String(32)	是	1900000109	微信支付分配的商户号
+     *   预支付交易会话ID	prepayid	String(32)	是	WX1217752501201407033233368018	微信返回的支付交易会话ID
+     *   扩展字段	package	String(128)	是	Sign=WXPay	暂填写固定值Sign=WXPay
+     *   随机字符串	noncestr	String(32)	是	5K8264ILTKCH16CQ2502SI8ZNMTM67VS	随机字符串，不长于32位。推荐随机数生成算法
+     *   时间戳	timestamp	String(10)	是	1412000000	时间戳，请见接口规则-参数规定
+     *   签名	sign	String(32)	是	C380BEC2BFD727A4B6845133519F3AD6	签名，详见签名生成算法注意：签名方式一定要与统一下单接口使用的一致
+     */
+    signForApp(params) {
+        const opts = {
+            appid: this.options.appid,
+            prepay_id: params.prepay_id,
+            partnerid: this.options.mch_id,
+            package: 'Sign=WXPay',
+            noncestr: util.generateNonceString(),
+            timestamp: util.timestamp(),
+        };
+        opts.sign = this.sign(opts);
+        return opts
+    }
+
+    request(url, params) {
+        return axios({
+                url: url,
+                method: 'post',
+                data: util.buildXML(params),
+            })
+            .then(res => {
+                return new Promise((resolve, reject) => {
+                    util.parseXML(res.data, function(err, result) {
+                        if (err) {
+                            reject(err)
+                        } else {
+                            resolve(result);
+                        }
+                    });
+                });
+            })
+    };
+
+
+    requestWithPfx(url, params) {
+        return axios({
+                url: url,
+                method: 'post',
+                data: util.buildXML(params),
+                certificate: {
+                    pfx: this.options.pfx, //格式是文件二进制内容
+                    pfxKey: this.options.mch_id
+                }
+            })
+            .then(res => {
+                return new Promise((resolve, reject) => {
+                    util.parseXML(res.data, function(err, result) {
+                        if (err) {
+                            reject(err)
+                        } else {
+                            resolve(result);
+                        }
+                    });
+                });
+            });
+    }
+
+
+    useWXCallback(fn) {
+        return function(req, res, next) {
+            var _this = this;
+            res.success = function() { res.end(util.buildXML({ xml: { return_code: 'SUCCESS' } })); };
+            res.fail = function() { res.end(util.buildXML({ xml: { return_code: 'FAIL' } })); };
+
+            util.pipe(req, function(err, data) {
+                var xml = data.toString('utf8');
+                util.parseXML(xml, function(err, msg) {
+                    req.wxmessage = msg;
+                    fn.apply(_this, [req, res, next]);
+                });
+            });
+        };
+    };
+
+    sign(param) {
+        var querystring = Object.keys(param).filter(function(key) {
+            return param[key] !== undefined && param[key] !== '' && ['pfx', 'partner_key', 'sign', 'key'].indexOf(key) < 0;
+        }).sort().map(function(key) {
+            return key + '=' + param[key];
+        }).join("&") + "&key=" + this.options.partner_key;
+        return md5(querystring).toUpperCase();
+    };
+    // 退款通知解密 
+    decrypt(req_info) {
+        const data = new Buffer(req_info, 'base64').toString();
+        const key = md5(this.options.partner_key);
+        const decipher = crypto.createDecipheriv('aes-256-ecb', key, "");
+        const cipherChunks = [];
+        decipher.setAutoPadding(true);
+        cipherChunks.push(decipher.update(data, 'utf8', 'base64'));
+        cipherChunks.push(decipher.final(utf8));
+        return cipherChunks.join('');
+    }
+}
+module.exports = WeixinPay;
