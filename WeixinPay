@@ -189,7 +189,7 @@ class WeixinPay {
     signForApp(params) {
         const opts = {
             appid: this.options.appid,
-            prepay_id: params.prepay_id,
+            prepayid: params.prepay_id,
             partnerid: this.options.mch_id,
             package: 'Sign=WXPay',
             noncestr: util.generateNonceString(),
