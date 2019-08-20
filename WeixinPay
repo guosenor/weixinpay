@@ -2,6 +2,7 @@ const util = require('./util');
 const axios = require('axios').create();
 var md5 = require('MD5');
 var crypto = require('crypto');
+var requestTool = require('request');
 
 class WeixinPay {
     constructor(config, sandbox) {
@@ -220,26 +221,28 @@ class WeixinPay {
 
 
     requestWithPfx(url, params) {
-        return axios({
+        const pfx = this.options.pfx;
+        const passphrase = this.options.mch_id;
+        return new Promise((resolve, reject) => [
+            requestTool({
                 url: url,
                 method: 'post',
-                data: util.buildXML(params),
-                certificate: {
-                    pfx: this.options.pfx, //格式是文件二进制内容
-                    pfxKey: this.options.mch_id
+                body: util.buildXML(params),
+                agentOptions: {
+                    pfx: pfx,
+                    passphrase: passphrase,
                 }
-            })
-            .then(res => {
-                return new Promise((resolve, reject) => {
-                    util.parseXML(res.data, function(err, result) {
-                        if (err) {
-                            reject(err)
-                        } else {
-                            resolve(result);
-                        }
-                    });
+            }, function(error, res, body) {
+                console.log(error, body)
+                util.parseXML(body, function(err, result) {
+                    if (err) {
+                        reject(err)
+                    } else {
+                        resolve(result);
+                    }
                 });
-            });
+            })
+        ])
     }
 
 
@@ -269,14 +272,21 @@ class WeixinPay {
     };
     // 退款通知解密 
     decrypt(req_info) {
-        const data = new Buffer(req_info, 'base64').toString();
         const key = md5(this.options.partner_key);
         const decipher = crypto.createDecipheriv('aes-256-ecb', key, "");
         const cipherChunks = [];
         decipher.setAutoPadding(true);
-        cipherChunks.push(decipher.update(data, 'utf8', 'base64'));
-        cipherChunks.push(decipher.final(utf8));
-        return cipherChunks.join('');
+        cipherChunks.push(decipher.update(req_info, 'base64', 'utf8'));
+        cipherChunks.push(decipher.final('utf8'));
+        return new Promise((resolve, reject) => {
+            util.parseXML(cipherChunks.join(''), function(err, result) {
+                if (err) {
+                    reject(err)
+                } else {
+                    resolve(result);
+                }
+            });
+        });
     }
 }
 module.exports = WeixinPay;
